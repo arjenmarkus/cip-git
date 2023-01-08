@@ -1,0 +1,233 @@
+\documentclass[onecolumn]{article}
+\begin{document}
+
+\title{Calculating in Parallel - a simple tool}
+
+\author{Arjen~Markus}
+
+\maketitle
+
+\section{Introduction}
+The \verb+CIP+ tool (Calculating in Parallel) is meant to solve a
+common enough problem: use the computer's resources as efficiently as
+possible without too much work. More specifically, it is meant for
+this situation:
+\begin{itemize}
+\item
+You need to run a bunch of calculations with the same program, say
+various water quality scenarios.
+\item
+Each calculation takes a fairly long while, a couple of hours perhaps.
+\item
+The computational program does not use the entire computer, that is,
+it does not exploit its multiple processors to speed up the
+calculation.
+\item
+You do not want to sit around and wait for the calculations to be run
+one by one.
+\end{itemize}
+You could write a small batch file or script that simply starts the
+various calculations and let it run on. But that might clog up the
+computer. And if you use the cluster, you see yourself forced to
+use one node per calculation.
+
+Well, enter \verb+CIP+. It helps you manage the calculations by
+starting them in the background, but not more than there are
+processors around. When a calculation is finished, the next is started
+until there are no more calculations left. Management of these
+calculations is automatic, you just need to follow a few simple
+conventions.
+
+This documentation describes what these conventions are and how
+\verb+CIP+ does its work. Hopefully it is a useful tool.
+
+
+\section{Setting up the calculations}
+\verb+CIP+ assumes that the files required as input for your
+calculations as well as the output files are generally stored in a
+single directory. So what it does is:
+\begin{itemize}
+\item
+Scan the subdirectories of the directory in which it was started
+\item
+If there is a file called \verb+nocomp.cip+ or \verb+started.cip+ in
+that subdirectory, it is skipped. Otherwise a calculation is started
+in that subdirectory. The first file indicates that this subdirectory
+is not meant for a calculation, the second file means a calculation
+has already been started (it may actually have finished).
+\item
+As soon as a calculation is to be started, a file \verb+started.cip+
+is created to indicate this is the case. Then the calculation is
+started (see below), the output from the program or programs is stored
+in a file \verb+output.cip+ and when the calculation is finished, a
+file \verb+done.cip+ is created.
+\end{itemize}
+
+Since this procedure is done in parallel "N" times, your program is
+started "N" times, each in its own subdirectory and each assigned to
+its own processor (\verb+CIP+ does assume that the operating system is
+smart enough to do this without any outside help).
+
+The various files are meant to help avoid racing conditions -- you do
+not want to start the same calculation twice, certainly not at the
+same time -- and to monitor the status of the calculation.
+
+Here is an example of what a directory with several subdirectories
+might look like. The calculation is done via a batch file (or shell
+script) \verb+runprogram.bat+, which calls \verb+program1+ and
+\verb+program2+. The input consists of a file \verb+database+ in a
+subdirectory on its own and a specific file \verb+myinput.inp+ in each
+of the calculation subdirectories. The directory and its
+subdirectories would look something like this:
+
+\begin{verbatim}
+scenarios/
+    fixed-data/
+        database               (Database required by the programs)
+        nocomp.cip             (Prevent computation here)
+    scen1/
+        myinput.inp            (Specific input for scenario "scen1")
+    scen2/
+        myinput.inp            (Specific input for scenario "scen2")
+    scen3/
+        myinput.inp            (Specific input for scenario "scen2")
+
+    runprogram.bat             (Batch file to run the programs)
+    program1.exe               (Computational program)
+    program2.exe               (Postprocessing, creates reports)
+\end{verbatim}
+
+The \verb+runprogram.bat+ batch file looks like this:
+\begin{verbatim}
+program1 %1
+if exists output goto postprocessing
+goto end
+:postprocessing
+program2 %1
+:end
+\end{verbatim}
+
+The batch file takes as argument the name of the input file --
+\verb+myinput.inp+ in this case. This name however is fixed, as
+\verb+CIP+ has no way to specify such arguments per calculation. If
+you need that, you can store a copy of the batch file in the
+calculation subdirectories.
+
+\emph{Note:} Since the calculations are done in various subdirectories,
+some care must be taken that the relevant programs, batch files and
+scripts can all be found. \verb+CIP+ tries to take care of all this by
+extending the \verb+PATH+ environment variable, but it does not know
+if arguments like \verb+myinput.inp+ refer to a file or not. You may
+need to help it by adding ".." or even the complete directory to such
+arguments.
+
+
+\section{Command-line arguments}
+\verb+CIP+ recognises the following arguments:
+
+\noindent \verb+-help+ \\
+\indent Present an overview of the commands.
+
+\noindent \verb+-status+ \\
+\indent Show which calculatons have already been started or done.
+
+\noindent \verb+-clear+ \\
+\indent Clear up the working directories so that you can restart all
+the calculations. This command removes the files \verb+started.cip+,
+\verb+output.cip+ and \verb+done.cip+, but not the file
+\verb+nocomp.cip+ in each of the directories.
+
+\noindent \verb+-procs <N>+ \\
+\indent Specify the number of simultaneous calculations (one per
+processor). If not, \verb+CIP+ will determine the likely number of
+useable processors with a simple heuristic method. This option allows
+you to control that number.
+
+\noindent \verb+-path <dir>+ \\
+\indent Specify a directory to be added to the PATH environment
+variable. You can specify one directory per \verb+-path+ argument.
+Note: The working directory is prepended after processing
+all the arguments.
+
+\noindent \verb+-run+ \\
+\indent This argument is used internally -- see section
+\ref{technicalDetails}. You should not use it yourself.
+
+\noindent \verb+--+ \\
+\indent Indicates the end of the options. Anything after that is
+considered part of the command that is to be run. This is especially
+useful if your program requires arguments that might be mistaken for
+\verb+CIP+ options.
+
+\noindent \emph{anything else} \\
+\indent All other arguments are assumed to be part of the command
+that is to be run.
+
+In the above example, running \verb+CIP+ can be done by:
+
+\begin{verbatim}
+cip -clean runprogram.bat myinput.inp
+\end{verbatim}
+
+\noindent or if you want to redo the calculations (after a change in
+the program perhaps or a new database):
+
+\begin{verbatim}
+cip -clear runprogram.bat myinput.inp
+\end{verbatim}
+
+With this command an individual calculation would be more or less
+equivalent to the following series of commands:
+
+\begin{verbatim}
+cd scen1
+echo Started >started.cip
+runprogram.bat myinput.inp >output.cip
+echo Done >done.cip
+\end{verbatim}
+
+
+\section{Some technical details}
+\label{technicalDetails}
+To better understand what \verb+CIP+ is doing, here are a few details:
+\begin{itemize}
+\item
+The number of processors is determined on Windows via the
+\verb+NUMBER_OF_PROCESSORS+ environment variable. This is a simple,
+but not entirely reliable method. The alternatives I have been able to
+find give unexpected and completely useless results.
+
+On Linux it counts the number of lines that contain "processor :" in
+the pseudo-file \verb+/proc/cpuinfo+.
+
+Whatever the method, hyperthreading will report a single hardware
+processor as two or more processors, whereas the effective number of
+processors might be less than that, as hyperthreading only makes a
+single processor appear to be several processors. There is no way of
+examining this that I know of. You might want to specify a lower
+number of processors to use to prevent slowdown of your computer.
+
+\item
+\verb+CIP+ clones itself "N" times. These clones use the special
+argument, \verb+-run+, as an indication that they should actually run
+the program. This way the operating system does the actual parallel
+processing and each clone can simply wait for the
+computational program to finish before starting the next.
+
+\item
+The files \verb+started.cip+ are created as "atomically" as possible,
+so that race conditions are avoided as much as possible. It is
+thus quite unlikely that two clones are able to start a calculation in
+the same directory.
+
+\item
+If two or more computers have access to the same working directory,
+for instance because it resides on a network disk, then you can
+actually start \verb+CIP+ on each of these computers and gain even
+more efficiency.
+
+\item
+\verb+CIP+ comes in a Windows version and a Linux version.
+\end{itemize}
+
+\end{document}
