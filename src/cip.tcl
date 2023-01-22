@@ -256,11 +256,7 @@ set number_args [llength $argv]
 set index 0
 set cmd ""
 
-if { $::tcl_platform(platform) eq "windows" } {
-    set path_sep ";"
-} else {
-    set path_sep ":"
-}
+set path_sep $tcl_platform(pathSeparator)
 
 while { $index < $number_args } {
     switch -glob -- [lindex $argv $index] {

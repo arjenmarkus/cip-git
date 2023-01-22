@@ -7,3 +7,5 @@ Document the auxiliary programs:
 * cip-statistics.tcl -- reporting for the random and table-driven modes
 * merge cip-diff and cip-statistics
 * use the configuration file consistently
+
+Add an option for optimisation via Nelder-Mead
